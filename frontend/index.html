@@ -1,0 +1,232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Debate Argument Generator</title>
+  <style>
+    :root { --radius: 10px; }
+    * { box-sizing: border-box; }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; color: #111; }
+    h1 { margin: 0 0 8px; }
+    .muted { color: #666; font-size: 13px; margin-bottom: 18px; }
+    textarea { width: 100%; height: 220px; font-size: 14px; padding: 12px; border-radius: var(--radius); border: 1px solid #ddd; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0 4px; }
+    label { font-size: 14px; }
+    select { padding: 8px; border-radius: var(--radius); border: 1px solid #ddd; font-size: 14px; }
+    .btn { padding: 10px 14px; border: 1px solid #222; background: #111; color: #fff; border-radius: var(--radius); cursor: pointer; }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    .panels { display: grid; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; }
+    @media (min-width: 950px) { .panels { grid-template-columns: 1fr 1fr; } }
+    .card { background: #fafafa; border: 1px solid #eee; border-radius: var(--radius); padding: 14px; }
+    .card h3 { margin: 0 0 8px; font-size: 18px; }
+    .controls { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .out { white-space: pre-wrap; background: #fff; padding: 12px; border-radius: var(--radius); border: 1px solid #eee; min-height: 120px; }
+    .inline { display: inline-flex; gap: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+  <h1>Debate Argument Generator</h1>
+  <p class="muted">Paste your bill below. Click Generate to get nationals-style Aff/Neg packages, and optionally full read-aloud speeches.</p>
+
+  <label for="bill">Bill Text</label>
+  <textarea id="bill" placeholder="Paste bill text or summary…"></textarea>
+
+  <div class="row">
+    <div class="inline">
+      <label for="minutes">Speech minutes:</label>
+      <select id="minutes">
+        <option>1</option><option selected>2</option><option>3</option><option>4</option>
+      </select>
+    </div>
+
+    <div class="inline">
+      <label for="style">Style:</label>
+      <select id="style">
+        <option selected>nationals</option>
+        <option>technical</option>
+        <option>novice-friendly</option>
+        <option>creative</option>
+        <option>razor</option>
+      </select>
+    </div>
+
+    <div class="inline">
+      <label for="novelty">Novelty:</label>
+      <select id="novelty">
+        <option selected>standard</option>
+        <option>high</option>
+        <option>wild</option>
+      </select>
+    </div>
+
+    <label class="inline"><input type="checkbox" id="qx" checked /> Include QX</label>
+    <label class="inline"><input type="checkbox" id="full" /> Return full speeches (+ Analogy Bank)</label>
+    <label class="inline"><input type="checkbox" id="polish" checked /> Polish output</label>
+
+    <button id="go" class="btn">Generate</button>
+  </div>
+
+  <!-- Custom instructions to steer generation -->
+  <div class="card" style="margin-top:12px;">
+    <h3>Custom Instructions (optional)</h3>
+    <textarea id="custom" placeholder="Ex: Avoid defense-sector angles; emphasize CMS reimbursement timeline; include Texas VA examples; bipartisan framing; no ethics clichés."></textarea>
+  </div>
+
+  <div class="panels">
+    <div class="card">
+      <div class="controls">
+        <h3 style="flex:1">Argument Package (Aff/Neg)</h3>
+        <button class="btn" id="copyPkg" title="Copy">Copy</button>
+      </div>
+      <div id="pkg" class="out"></div>
+    </div>
+
+    <div class="card" id="speechCard" style="display:none;">
+      <div class="controls">
+        <h3 style="flex:1">Full Speeches</h3>
+        <button class="btn" id="copySpeeches" title="Copy">Copy</button>
+      </div>
+      <div id="speeches" class="out"></div>
+    </div>
+  </div>
+
+  <!-- Chat Playground for ad-hoc tweaks and topic-specific asks -->
+  <div class="card" style="margin-top:16px;">
+    <div class="controls">
+      <h3 style="flex:1">Chat Playground</h3>
+    </div>
+    <textarea id="chatMsg" placeholder="Ask for topic-specific tweaks, rewrite a contention, request evidence prompts, add constraints, etc."></textarea>
+    <div class="row" style="margin-top:8px;">
+      <div class="inline">
+        <label for="chatStyle">Style:</label>
+        <select id="chatStyle">
+          <option selected>razor</option>
+          <option>nationals</option>
+          <option>technical</option>
+          <option>novice-friendly</option>
+          <option>creative</option>
+        </select>
+      </div>
+      <div class="inline">
+        <label for="chatNovelty">Novelty:</label>
+        <select id="chatNovelty">
+          <option selected>standard</option>
+          <option>high</option>
+          <option>wild</option>
+        </select>
+      </div>
+      <button id="ask" class="btn">Ask</button>
+    </div>
+    <div id="chatOut" class="out" style="margin-top:10px;"></div>
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const outPkg = document.getElementById('pkg');
+    const outSpeeches = document.getElementById('speeches');
+    const speechCard = document.getElementById('speechCard');
+    const btn = document.getElementById('go');
+    const btnCopyPkg = document.getElementById('copyPkg');
+    const btnCopySpeeches = document.getElementById('copySpeeches');
+
+    // Chat refs
+    const askBtn = document.getElementById('ask');
+    const chatMsg = document.getElementById('chatMsg');
+    const chatOut = document.getElementById('chatOut');
+
+    // Change if your API runs elsewhere
+    const api = (path) => `http://127.0.0.1:8000${path}`;
+
+    async function generate() {
+      const bill = document.getElementById('bill').value.trim();
+      const minutes = parseInt(document.getElementById('minutes').value, 10);
+      const style = document.getElementById('style').value;
+      const novelty = document.getElementById('novelty').value;
+      const qx = document.getElementById('qx').checked;
+      const full = document.getElementById('full').checked;
+      const polish = document.getElementById('polish').checked;
+      const custom = (document.getElementById('custom').value || "").trim();
+
+      if (!bill) { alert('Please paste a bill.'); return; }
+
+      outPkg.textContent = 'Generating argument package…';
+      outSpeeches.textContent = '';
+      speechCard.style.display = 'none';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch(api('/api/generate'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bill,
+            speech_minutes: minutes,
+            style,
+            novelty,
+            return_qx: qx,
+            return_full_speeches: full,
+            polish,
+            custom_instructions: custom || null
+          })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.detail || 'Generation failed');
+
+        outPkg.textContent = data.result || '(empty)';
+        if (data.speeches && data.speeches.trim().length > 0) {
+          outSpeeches.textContent = data.speeches;
+          speechCard.style.display = 'block';
+        }
+      } catch (e) {
+        outPkg.textContent = 'Error: ' + e.message;
+        speechCard.style.display = 'none';
+        console.error(e);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function copyToClipboard(text) {
+      try { await navigator.clipboard.writeText(text); }
+      catch {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta);
+        ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      }
+    }
+
+    async function askChat() {
+      const message = (chatMsg.value || "").trim();
+      const bill = document.getElementById('bill').value.trim();
+      const style = document.getElementById('chatStyle').value;
+      const novelty = document.getElementById('chatNovelty').value;
+      if (!message) { alert('Type a message.'); return; }
+
+      chatOut.textContent = 'Thinking…';
+      askBtn.disabled = true;
+      try {
+        const res = await fetch(api('/api/chat'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, bill: bill || null, style, novelty })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.detail || 'Chat failed');
+        chatOut.textContent = data.result || '(empty)';
+      } catch (e) {
+        chatOut.textContent = 'Error: ' + e.message;
+        console.error(e);
+      } finally {
+        askBtn.disabled = false;
+      }
+    }
+
+    btn.onclick = generate;
+    btnCopyPkg.onclick = () => copyToClipboard(outPkg.textContent);
+    btnCopySpeeches.onclick = () => copyToClipboard(outSpeeches.textContent);
+    askBtn.onclick = askChat;
+  });
+  </script>
+</body>
+</html>
